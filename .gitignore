@@ -33,3 +33,4 @@ go.work.sum
 
 # Service Accounts
 serviceAccountKey.json
+wcs-booking-creds.json

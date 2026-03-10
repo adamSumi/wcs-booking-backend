@@ -2,34 +2,56 @@ package db
 
 import (
 	"context"
-	"fmt"
 	"log"
 
 	"cloud.google.com/go/firestore"
 	"firebase.google.com/go/v4"
+	"firebase.google.com/go/v4/storage"
+	"google.golang.org/api/calendar/v3"
 	"google.golang.org/api/option"
 )
 
-// InitFirestore initializes the app and returns the Firestore client
-func InitFirestore() *firestore.Client {
+// AppClients holds all our GCP/Firebase connections
+type AppClients struct {
+	Firestore *firestore.Client
+	Storage   *storage.Client
+	Calendar  *calendar.Service
+}
+
+func InitClients() *AppClients {
 	ctx := context.Background()
+	opt := option.WithCredentialsFile("wcs-booking-creds.json")
 
-	// IMPORTANT: We assume serviceAccountKey.json is in the project ROOT.
-	sa := option.WithCredentialsFile("serviceAccountKey.json")
-
-	// Update this with your actual Project ID from the previous step
-	conf := &firebase.Config{ProjectID: "wcs-organizer"}
-
-	app, err := firebase.NewApp(ctx, conf, sa)
+	// 1. Init Firebase App (for Firestore & Storage)
+	config := &firebase.Config{
+		StorageBucket: "wcs-booking-backend.firebasestorage.app",
+	}
+	app, err := firebase.NewApp(ctx, config, opt)
 	if err != nil {
-		log.Fatalf("error initializing app: %v\n", err)
+		log.Fatalf("Error initializing Firebase app: %v\n", err)
 	}
 
-	client, err := app.Firestore(ctx)
+	firestoreClient, err := app.Firestore(ctx)
 	if err != nil {
-		log.Fatalf("error initializing firestore client: %v\n", err)
+		log.Fatalf("Error initializing Firestore: %v\n", err)
 	}
 
-	fmt.Println("Connected to Firestore")
-	return client
+	storageClient, err := app.Storage(ctx)
+	if err != nil {
+		log.Fatalf("Error initializing Storage: %v\n", err)
+	}
+
+	// 2. Init Google Calendar Service
+	calendarService, err := calendar.NewService(ctx, opt)
+	if err != nil {
+		log.Fatalf("Error initializing Calendar service: %v\n", err)
+	}
+
+	log.Println("Successfully connected to Firestore, Storage, and Calendar APIs")
+
+	return &AppClients{
+		Firestore: firestoreClient,
+		Storage:   storageClient,
+		Calendar:  calendarService,
+	}
 }

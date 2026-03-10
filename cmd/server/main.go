@@ -6,23 +6,31 @@ import (
 
 	"github.com/adamSumi/wcs-admin/internal/db"
 	"github.com/adamSumi/wcs-admin/internal/handlers"
+	"github.com/adamSumi/wcs-admin/internal/middleware"
 )
 
 func main() {
-	// 1. Initialize DB
-	client := db.InitFirestore()
-	defer client.Close()
+	// Initialize everything
+	appClients := db.InitClients()
+	defer appClients.Firestore.Close()
 
-	// 2. Initialize Handlers
-	userHandler := &handlers.UserHandler{Client: client}
+	// Pass all three clients to the handler
+	bookingHandler := &handlers.BookingHandler{
+		Firestore: appClients.Firestore,
+		Storage:   appClients.Storage,
+		Calendar:  appClients.Calendar,
+	}
 
-	// 3. Define Routes
-	// This tells the server: "When someone POSTs to /users, run CreateUser"
-	http.HandleFunc("POST /users", userHandler.CreateUser)
+	mux := http.NewServeMux()
 
-	// 4. Start Server
+	// Add your routes
+	mux.HandleFunc("GET /api/availability", bookingHandler.GetAvailability)
+	mux.HandleFunc("POST /api/bookings", bookingHandler.CreateBooking)
+
+	handler := middleware.EnableCORS(mux)
+
 	log.Println("Server starting on :8080...")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	if err := http.ListenAndServe(":8080", handler); err != nil {
 		log.Fatal(err)
 	}
 }

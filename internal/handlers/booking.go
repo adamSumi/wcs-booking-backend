@@ -69,12 +69,21 @@ func (h *BookingHandler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Extract the text fields and build the model
+	locationVal := r.FormValue("location")
+	if locationVal == "loc1" {
+		locationVal = "Infinity Dancesport Studio"
+	} else if locationVal == "loc2" {
+		locationVal = "Atomic Ballroom"
+	} else if locationVal == "other" {
+		locationVal = r.FormValue("other-location")
+	}
+
 	booking := models.Booking{
 		Name:          r.FormValue("name"),
 		Email:         r.FormValue("email"),
 		Timeslot:      r.FormValue("timeslot"),
 		Role:          r.FormValue("role"),
-		Location:      r.FormValue("location"),
+		Location:      locationVal,
 		ContactVia:    r.FormValue("contact-via"),
 		ContactHandle: r.FormValue("handle"),
 		Notes:         r.FormValue("notes"),
@@ -94,21 +103,73 @@ func (h *BookingHandler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// --- GOOGLE CALENDAR INJECTION ---
+
+	// 1. Parse the custom timeslot string from the frontend
+	// Example format coming from Svelte: "2026-03-10 06:00 PM"
+	timeslotStr := r.FormValue("timeslot")
+	loc, _ := time.LoadLocation("America/Los_Angeles")
+
+	startTime, err := time.ParseInLocation("2006-01-02 03:04 PM", timeslotStr, loc)
+	if err != nil {
+		fmt.Printf("Warning: Failed to parse timeslot for calendar: %v\n", err)
+		// We log the error but don't fail the whole request,
+		// since the Firestore document was still saved.
+	} else {
+		// 2. Define the lesson length (assuming 1 hour here)
+		endTime := startTime.Add(1 * time.Hour)
+
+		// 3. Construct the Calendar Event
+		// We can stuff the optional dropdown data into the description
+		description := fmt.Sprintf("Email: %s\nRole: %s\nLocation: %s\nContact Via: %s\nHandle: %s\n\nNotes:\n%s",
+			booking.Email,
+			booking.Role,
+			booking.Location,
+			booking.ContactVia,
+			booking.ContactHandle,
+			booking.Notes,
+		)
+
+		newCalEvent := &calendar.Event{
+			Summary:     "WCS Lesson: " + r.FormValue("name"),
+			Description: description,
+			Start: &calendar.EventDateTime{
+				DateTime: startTime.Format(time.RFC3339),
+				TimeZone: "America/Los_Angeles",
+			},
+			End: &calendar.EventDateTime{
+				DateTime: endTime.Format(time.RFC3339),
+				TimeZone: "America/Los_Angeles",
+			},
+			// Optional: Color code the event (e.g., "1" is Lavender, "9" is Blueberry)
+			ColorId: "9",
+		}
+
+		// 4. Insert the event into the calendar
+		// Uses the same global calendarID constant we defined earlier
+		_, err = h.Calendar.Events.Insert(calendarID, newCalEvent).Do()
+		if err != nil {
+			fmt.Printf("Warning: Failed to create calendar event: %v\n", err)
+		} else {
+			fmt.Println("Successfully added lesson to Google Calendar!")
+		}
+	}
+	// ---------------------------------
+
 	// 5. Send success response
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte("Booking successfully created!"))
 }
 
 func (h *BookingHandler) GetAvailability(w http.ResponseWriter, r *http.Request) {
-	// Force timezone to match your local San Diego time for accurate day boundaries
 	loc, _ := time.LoadLocation("America/Los_Angeles")
-
-	// Set the window: from right now until exactly 1 month from now
 	now := time.Now().In(loc)
-	timeMin := now.Format(time.RFC3339)
+
+	// Fetch from midnight today, instead of this exact second
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	timeMin := startOfDay.Format(time.RFC3339)
 	timeMax := now.AddDate(0, 1, 0).Format(time.RFC3339)
 
-	// Fetch events from Google Calendar
 	events, err := h.Calendar.Events.List(calendarID).
 		ShowDeleted(false).
 		SingleEvents(true).
@@ -122,40 +183,69 @@ func (h *BookingHandler) GetAvailability(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// This map will group our chunks by date. Format: {"2026-03-10": ["06:00 PM", "06:30 PM"]}
-	availability := make(map[string][]string)
+	type timeBlock struct {
+		start time.Time
+		end   time.Time
+	}
+	var availableBlocks []timeBlock
+	var busyBlocks []timeBlock
 
 	for _, item := range events.Items {
-		// IMPORTANT: This filters for events specifically named "Available".
-		// You can change this to "Teaching Block" or whatever you prefer.
-		if item.Summary != "Private Lesson Availability" {
-			continue
-		}
-
-		// Skip all-day events (they don't have a specific DateTime)
 		if item.Start.DateTime == "" {
-			continue
+			continue // Skip all-day events
 		}
 
-		// Parse the start and end times from Google's RFC3339 format
 		startTime, _ := time.Parse(time.RFC3339, item.Start.DateTime)
 		endTime, _ := time.Parse(time.RFC3339, item.End.DateTime)
 
-		// Ensure the parsed times are evaluated in your local timezone
-		startTime = startTime.In(loc)
-		endTime = endTime.In(loc)
+		block := timeBlock{
+			start: startTime.In(loc),
+			end:   endTime.In(loc),
+			name:  item.Summary,
+		}
 
-		// The Chunking Engine: Loop through the block in 30-minute increments
-		for t := startTime; t.Before(endTime); t = t.Add(30 * time.Minute) {
-			dateKey := t.Format("2006-01-02") // Output: YYYY-MM-DD
-			timeValue := t.Format("03:04 PM") // Output: HH:MM AM/PM
-
-			// Append the 30-minute chunk to that specific date's array
-			availability[dateKey] = append(availability[dateKey], timeValue)
+		if item.Summary == "Private Lesson Availability" {
+			availableBlocks = append(availableBlocks, block)
+		} else {
+			busyBlocks = append(busyBlocks, block)
 		}
 	}
 
-	// Return the grouped slots as JSON
+	availability := make(map[string][]string)
+
+	for _, avail := range availableBlocks {
+		for t := avail.start; t.Before(avail.end); t = t.Add(30 * time.Minute) {
+
+			slotStart := t
+			slotEnd := t.Add(1 * time.Hour)
+
+			if slotEnd.After(avail.end) {
+				continue
+			}
+
+			if slotStart.Before(now) {
+				continue
+			}
+
+			isBusy := false
+			for _, busy := range busyBlocks {
+				if slotStart.Before(busy.end) && slotEnd.After(busy.start) {
+					isBusy = true
+					break
+				}
+			}
+
+			if !isBusy {
+				dateKey := slotStart.Format("2006-01-02")
+				timeValue := slotStart.Format("03:04 PM")
+				availability[dateKey] = append(availability[dateKey], timeValue)
+			}
+		}
+	}
+
+	// KILL THE BROWSER CACHE
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Content-Type", "application/json")
+
 	json.NewEncoder(w).Encode(availability)
 }

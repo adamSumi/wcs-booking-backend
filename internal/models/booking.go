@@ -13,6 +13,6 @@ type Booking struct {
 	ContactVia    string    `firestore:"contactVia" json:"contactVia"`
 	ContactHandle string    `firestore:"contactHandle" json:"contactHandle"`
 	Notes         string    `firestore:"notes" json:"notes"`
-	VideoURL      string    `firestore:"videoUrl" json:"videoUrl"` // URL to the file in Cloud Storage
+	VideoURL      string    `firestore:"videoUrl" json:"videoUrl"`
 	CreatedAt     time.Time `firestore:"createdAt" json:"createdAt"`
 }

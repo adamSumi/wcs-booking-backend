@@ -10,7 +10,6 @@ import (
 )
 
 func main() {
-	// Initialize everything
 	appClients := db.InitClients()
 	defer appClients.Firestore.Close()
 
@@ -23,7 +22,6 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Add your routes
 	mux.HandleFunc("GET /api/availability", bookingHandler.GetAvailability)
 	mux.HandleFunc("POST /api/bookings", bookingHandler.CreateBooking)
 

@@ -11,7 +11,6 @@ import (
 	"google.golang.org/api/option"
 )
 
-// AppClients holds all our GCP/Firebase connections
 type AppClients struct {
 	Firestore *firestore.Client
 	Storage   *storage.Client

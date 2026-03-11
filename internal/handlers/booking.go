@@ -9,8 +9,8 @@ import (
 	"encoding/json"
 
 	"cloud.google.com/go/firestore"
-	gcpstorage "cloud.google.com/go/storage" // Add the core GCP package with an alias
-	"firebase.google.com/go/v4/storage"      // Keep the Firebase wrapper
+	gcpstorage "cloud.google.com/go/storage"
+	"firebase.google.com/go/v4/storage"
 	"github.com/adamSumi/wcs-admin/internal/models"
 	"github.com/google/uuid"
 	"google.golang.org/api/calendar/v3"
@@ -25,8 +25,8 @@ type BookingHandler struct {
 const calendarID = "32744b9f5124af54aa4436631f090b07d15d2f7d0960a59d3885431f0d4c0bec@group.calendar.google.com"
 
 func (h *BookingHandler) CreateBooking(w http.ResponseWriter, r *http.Request) {
-	// 1. Limit the upload size (e.g., 50MB max memory parsing)
-	err := r.ParseMultipartForm(50 << 20)
+	// 1. Limit the upload size (e.g., 500MB max memory parsing)
+	err := r.ParseMultipartForm(500 << 20)
 	if err != nil {
 		http.Error(w, "Unable to parse form", http.StatusBadRequest)
 		return
@@ -113,14 +113,11 @@ func (h *BookingHandler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 	startTime, err := time.ParseInLocation("2006-01-02 03:04 PM", timeslotStr, loc)
 	if err != nil {
 		fmt.Printf("Warning: Failed to parse timeslot for calendar: %v\n", err)
-		// We log the error but don't fail the whole request,
-		// since the Firestore document was still saved.
 	} else {
 		// 2. Define the lesson length (assuming 1 hour here)
 		endTime := startTime.Add(1 * time.Hour)
 
 		// 3. Construct the Calendar Event
-		// We can stuff the optional dropdown data into the description
 		description := fmt.Sprintf("Email: %s\nRole: %s\nLocation: %s\nContact Via: %s\nHandle: %s\n\nNotes:\n%s",
 			booking.Email,
 			booking.Role,
@@ -141,12 +138,10 @@ func (h *BookingHandler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 				DateTime: endTime.Format(time.RFC3339),
 				TimeZone: "America/Los_Angeles",
 			},
-			// Optional: Color code the event (e.g., "1" is Lavender, "9" is Blueberry)
 			ColorId: "9",
 		}
 
 		// 4. Insert the event into the calendar
-		// Uses the same global calendarID constant we defined earlier
 		_, err = h.Calendar.Events.Insert(calendarID, newCalEvent).Do()
 		if err != nil {
 			fmt.Printf("Warning: Failed to create calendar event: %v\n", err)
@@ -154,7 +149,6 @@ func (h *BookingHandler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 			fmt.Println("Successfully added lesson to Google Calendar!")
 		}
 	}
-	// ---------------------------------
 
 	// 5. Send success response
 	w.WriteHeader(http.StatusCreated)
@@ -165,7 +159,6 @@ func (h *BookingHandler) GetAvailability(w http.ResponseWriter, r *http.Request)
 	loc, _ := time.LoadLocation("America/Los_Angeles")
 	now := time.Now().In(loc)
 
-	// Fetch from midnight today, instead of this exact second
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	timeMin := startOfDay.Format(time.RFC3339)
 	timeMax := now.AddDate(0, 1, 0).Format(time.RFC3339)
@@ -192,7 +185,7 @@ func (h *BookingHandler) GetAvailability(w http.ResponseWriter, r *http.Request)
 
 	for _, item := range events.Items {
 		if item.Start.DateTime == "" {
-			continue // Skip all-day events
+			continue
 		}
 
 		startTime, _ := time.Parse(time.RFC3339, item.Start.DateTime)
@@ -201,7 +194,6 @@ func (h *BookingHandler) GetAvailability(w http.ResponseWriter, r *http.Request)
 		block := timeBlock{
 			start: startTime.In(loc),
 			end:   endTime.In(loc),
-			name:  item.Summary,
 		}
 
 		if item.Summary == "Private Lesson Availability" {
@@ -243,7 +235,6 @@ func (h *BookingHandler) GetAvailability(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// KILL THE BROWSER CACHE
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Content-Type", "application/json")
 

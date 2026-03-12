@@ -8,7 +8,7 @@ import (
 	"firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/storage"
 	"google.golang.org/api/calendar/v3"
-	"google.golang.org/api/option"
+	// "google.golang.org/api/option"
 )
 
 type AppClients struct {
@@ -19,13 +19,16 @@ type AppClients struct {
 
 func InitClients() *AppClients {
 	ctx := context.Background()
-	opt := option.WithCredentialsFile("wcs-booking-creds.json")
+	// opt := option.WithCredentialsFile("wcs-booking-creds.json")
 
 	// 1. Init Firebase App (for Firestore & Storage)
 	config := &firebase.Config{
 		StorageBucket: "wcs-booking-backend.firebasestorage.app",
 	}
-	app, err := firebase.NewApp(ctx, config, opt)
+
+	//app, err := firebase.NewApp(ctx, config, opt)
+	app, err := firebase.NewApp(ctx, config)
+
 	if err != nil {
 		log.Fatalf("Error initializing Firebase app: %v\n", err)
 	}
@@ -41,7 +44,8 @@ func InitClients() *AppClients {
 	}
 
 	// 2. Init Google Calendar Service
-	calendarService, err := calendar.NewService(ctx, opt)
+	// calendarService, err := calendar.NewService(ctx, opt)
+	calendarService, err := calendar.NewService(ctx)
 	if err != nil {
 		log.Fatalf("Error initializing Calendar service: %v\n", err)
 	}
